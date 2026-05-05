@@ -285,7 +285,10 @@ public struct ZImageQuantizer {
       array.shape.reduce(1, *) * array.dtype.size
     }
 
-    let ordered = weights.keys.sorted().map { ($0, weights[$0]!) }
+    let ordered = weights.keys.sorted().compactMap { key -> (String, MLXArray)? in
+      guard let value = weights[key] else { return nil }
+      return (key, value)
+    }
     var chunks: [[(String, MLXArray)]] = []
     var current: [(String, MLXArray)] = []
     var currentBytes = 0

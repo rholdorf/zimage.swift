@@ -24,6 +24,7 @@ enum ZImageAttentionUtils {
     _ freqsSin: MLXArray
   ) -> MLXArray {
     let shape = x.shape
+    // SAFETY: shape.last is guaranteed non-nil — attention tensors always have ≥1 dimension
     let newShape = Array(shape.dropLast()) + [shape.last! / 2, 2]
     let xReshaped = x.reshaped(newShape)
 

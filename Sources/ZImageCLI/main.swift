@@ -78,9 +78,11 @@ struct ZImageCLI {
       case "--lora", "-l":
         loraPaths.append((path: nextValue(for: arg, iterator: &iterator), scale: 1.0))
       case "--lora-scale":
-        if !loraPaths.isEmpty {
-          loraPaths[loraPaths.count - 1].scale = floatValue(for: arg, iterator: &iterator, fallback: 1.0)
+        if loraPaths.isEmpty {
+          fputs("Error: --lora-scale must follow a --lora argument\n", stderr)
+          exit(1)
         }
+        loraPaths[loraPaths.count - 1].scale = floatValue(for: arg, iterator: &iterator, fallback: 1.0)
       case "--enhance", "-e":
         enhancePrompt = true
       case "--help", "-h":
@@ -481,9 +483,11 @@ struct ZImageCLI {
       case "--lora", "-l":
         loraPaths.append((path: nextValue(for: arg, iterator: &iterator), scale: 1.0))
       case "--lora-scale":
-        if !loraPaths.isEmpty {
-          loraPaths[loraPaths.count - 1].scale = floatValue(for: arg, iterator: &iterator, fallback: 1.0)
+        if loraPaths.isEmpty {
+          fputs("Error: --lora-scale must follow a --lora argument\n", stderr)
+          exit(1)
         }
+        loraPaths[loraPaths.count - 1].scale = floatValue(for: arg, iterator: &iterator, fallback: 1.0)
       case "--help", "-h":
         printControlUsage()
         return
@@ -641,7 +645,8 @@ struct ZImageCLI {
 
   private static func nextValue(for arg: String, iterator: inout IndexingIterator<[String]>) -> String {
     guard let value = iterator.next() else {
-      fatalError("Expected value after \(arg)")
+      fputs("Error: expected value after \(arg)\n", stderr)
+      exit(1)
     }
     return value
   }

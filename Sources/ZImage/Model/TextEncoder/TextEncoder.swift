@@ -571,6 +571,7 @@ extension QwenTextEncoder {
         precondition(cursor < replacementCount, "[QwenTextEncoder] placeholder mismatch in row \(row)")
         let dest = position * hiddenDim
         let src = cursor * hiddenDim
+        // SAFETY: baseAddress is guaranteed non-nil for non-empty arrays inside withUnsafe*BufferPointer
         rowValues.withUnsafeMutableBufferPointer { destPtr in
           replacementValues.withUnsafeBufferPointer { srcPtr in
             memcpy(

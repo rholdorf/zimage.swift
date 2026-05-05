@@ -379,6 +379,7 @@ private final class VAEEncoder: Module {
     var downs: [VAEDownBlock] = []
     for (index, channel) in channels.enumerated() {
       let isLast = index == channels.count - 1
+      // SAFETY: channels is non-empty — validated by config parsing
       let inCh = index == 0 ? channels.first! : channels[index - 1]
       downs.append(
         VAEDownBlock(
