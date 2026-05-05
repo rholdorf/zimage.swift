@@ -59,8 +59,8 @@ ZImageCLI -h
 | `-o, --output` | Output path | z-image.png |
 | `-m, --model` | Model path or HuggingFace ID | Tongyi-MAI/Z-Image-Turbo |
 | `--cache-limit` | GPU memory cache limit in MB | unlimited |
-| `-l, --lora` | LoRA weights path or HuggingFace ID | - |
-| `--lora-scale` | LoRA scale factor | 1.0 |
+| `-l, --lora` | LoRA weights path or HuggingFace ID (can be specified multiple times) | - |
+| `--lora-scale` | LoRA scale factor for the preceding `--lora` | 1.0 |
 
 ## Examples
 
@@ -79,14 +79,21 @@ ZImageCLI -p "abstract art" --cache-limit 2048 -o art.png
 
 # With LoRA
 ZImageCLI -p "a lion" --lora ostris/z_image_turbo_childrens_drawings -o lion.png
+
+# With multiple LoRAs
+ZImageCLI -p "a lion" --lora lora1 --lora-scale 0.8 --lora lora2 --lora-scale 0.5 -o lion.png
 ```
 
 ## LoRA
 
-Apply LoRA weights for style customization:
+Apply LoRA weights for style customization. Multiple LoRAs can be stacked, each with its own scale:
 
 ```bash
+# Single LoRA
 ZImageCLI -p "a lion" --lora ostris/z_image_turbo_childrens_drawings --lora-scale 1.0 -o lion.png
+
+# Multiple LoRAs
+ZImageCLI -p "a lion" --lora lora_style --lora-scale 0.8 --lora lora_detail --lora-scale 0.5 -o lion.png
 ```
 
 ### LoRA Example
@@ -148,6 +155,26 @@ ZImageCLI control \
 | Prompt | Output |
 |--------|--------|
 | A dramatic, cinematic japanese-action scene in a edo era Kyoto city. A woman named Harley Quinn from the movie "Birds of Prey" in colorful, punk-inspired comic-villain attire walks confidently while holding the arm of a serious-looking man named John Wick played by Keanu Reeves from the fantastic film John Wick 2 in a black suit, her t-shirt says "Birds of Prey", the characters are capture in a postcard held by a hand in front of a beautiful realistic city at sunset and there is cursive writing that says "ZImage, Now in MLX" | ![Output](examples/z-image.png) |
+
+## Model Storage
+
+Models are automatically downloaded from HuggingFace Hub on first use. The cache directory is resolved in the following order:
+
+1. `$HF_HUB_CACHE` environment variable (if set)
+2. `$HF_HOME/hub` (if `HF_HOME` is set)
+3. `~/.cache/huggingface/hub/` (default)
+
+Each model is stored under `models--<org>--<repo>/snapshots/<revision>/` within the cache directory. For example, the default model lives at:
+
+```
+~/.cache/huggingface/hub/models--Tongyi-MAI--Z-Image-Turbo/snapshots/<revision>/
+```
+
+To see which models are already cached:
+
+```bash
+ls ~/.cache/huggingface/hub/
+```
 
 ## Quantization
 

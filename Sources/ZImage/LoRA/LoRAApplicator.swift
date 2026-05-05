@@ -194,19 +194,19 @@ public struct LoRAApplicator {
                 continue
             }
             if let loraLinear = module as? LoRALinear {
-                loraLinear.setLoRA(down: down, up: up, scale: effectiveScale)
+                loraLinear.addLoRA(down: down, up: up, scale: effectiveScale)
                 appliedCount += 1
                 continue
             }
             if let loraQuantized = module as? LoRAQuantizedLinear {
-                loraQuantized.setLoRA(down: down, up: up, scale: effectiveScale)
+                loraQuantized.addLoRA(down: down, up: up, scale: effectiveScale)
                 appliedCount += 1
                 quantizedCount += 1
                 continue
             }
             if let quantizedLinear = module as? QuantizedLinear {
                 let loraQuantized = LoRAQuantizedLinear(from: quantizedLinear)
-                loraQuantized.setLoRA(down: down, up: up, scale: effectiveScale)
+                loraQuantized.addLoRA(down: down, up: up, scale: effectiveScale)
                 moduleUpdates.append((key, loraQuantized))
                 appliedCount += 1
                 quantizedCount += 1
@@ -214,7 +214,7 @@ public struct LoRAApplicator {
             }
             if let linear = module as? Linear {
                 let loraLinear = LoRALinear(from: linear)
-                loraLinear.setLoRA(down: down, up: up, scale: effectiveScale)
+                loraLinear.addLoRA(down: down, up: up, scale: effectiveScale)
                 moduleUpdates.append((key, loraLinear))
                 appliedCount += 1
                 continue

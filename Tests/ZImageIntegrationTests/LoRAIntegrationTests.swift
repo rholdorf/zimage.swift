@@ -46,7 +46,7 @@ final class LoRAIntegrationTests: XCTestCase {
       steps: 9,
       outputPath: tempOutput,
       model: "mzbac/z-image-turbo-8bit",
-      lora: loraConfig
+      loras: [loraConfig]
     )
 
     let outputURL = try await pipeline.generate(request)
@@ -81,7 +81,7 @@ final class LoRAIntegrationTests: XCTestCase {
       seed: seed,
       outputPath: withLoraOutput,
       model: "mzbac/z-image-turbo-8bit",
-      lora: loraConfig
+      loras: [loraConfig]
     )
     _ = try await pipeline.generate(requestWithLora)
     XCTAssertTrue(FileManager.default.fileExists(atPath: noLoraOutput.path))
@@ -104,7 +104,7 @@ final class LoRAIntegrationTests: XCTestCase {
       steps: 9,
       outputPath: tempOutput,
       model: "mzbac/z-image-turbo-8bit",
-      lora: .local("/nonexistent/path/to/lora")
+      loras: [.local("/nonexistent/path/to/lora")]
     )
     do {
       _ = try await pipeline.generate(request)

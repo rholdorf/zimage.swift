@@ -45,8 +45,7 @@ struct ZImageCLI {
     var model: String?
     var cacheLimit: Int?
     var maxSequenceLength = 512
-    var loraPath: String?
-    var loraScale: Float = 1.0
+    var loraPaths: [(path: String, scale: Float)] = []
     var enhancePrompt = false
 
     let args = Array(CommandLine.arguments.dropFirst())
@@ -77,9 +76,11 @@ struct ZImageCLI {
       case "--max-sequence-length":
         maxSequenceLength = intValue(for: arg, iterator: &iterator, minimum: 64, fallback: 512)
       case "--lora", "-l":
-        loraPath = nextValue(for: arg, iterator: &iterator)
+        loraPaths.append((path: nextValue(for: arg, iterator: &iterator), scale: 1.0))
       case "--lora-scale":
-        loraScale = floatValue(for: arg, iterator: &iterator, fallback: 1.0)
+        if !loraPaths.isEmpty {
+          loraPaths[loraPaths.count - 1].scale = floatValue(for: arg, iterator: &iterator, fallback: 1.0)
+        }
       case "--enhance", "-e":
         enhancePrompt = true
       case "--help", "-h":
@@ -108,12 +109,11 @@ struct ZImageCLI {
       GPU.set(cacheLimit: limit * 1024 * 1024)
       logger.info("GPU cache limit set to \(limit)MB")
     }
-    let loraConfig: LoRAConfiguration? = loraPath.map { path in
-
-      if path.hasPrefix("/") || path.hasPrefix("./") || path.hasPrefix("~") {
-        return .local(path, scale: loraScale)
+    let loraConfigs: [LoRAConfiguration] = loraPaths.map { entry in
+      if entry.path.hasPrefix("/") || entry.path.hasPrefix("./") || entry.path.hasPrefix("~") {
+        return .local(entry.path, scale: entry.scale)
       } else {
-        return .huggingFace(path, scale: loraScale)
+        return .huggingFace(entry.path, scale: entry.scale)
       }
     }
 
@@ -128,7 +128,7 @@ struct ZImageCLI {
       outputPath: URL(fileURLWithPath: outputPath),
       model: model,
       maxSequenceLength: maxSequenceLength,
-      lora: loraConfig,
+      loras: loraConfigs,
       enhancePrompt: enhancePrompt
     )
 
@@ -161,8 +161,8 @@ struct ZImageCLI {
       --model, -m            Model path or HuggingFace ID (default: \(ZImageRepository.id))
       --cache-limit          GPU memory cache limit in MB (default: unlimited)
       --max-sequence-length  Maximum sequence length for text encoding (default: 512)
-      --lora, -l             LoRA weights path or HuggingFace ID
-      --lora-scale           LoRA scale factor (default: 1.0)
+      --lora, -l             LoRA weights path or HuggingFace ID (can be specified multiple times)
+      --lora-scale           LoRA scale factor for the preceding --lora (default: 1.0)
       --enhance, -e          Enhance prompt using LLM (requires ~5GB extra VRAM)
       --help, -h             Show help
 
@@ -192,7 +192,8 @@ struct ZImageCLI {
       ZImageCLI -p "a cute cat" -o cat.png
       ZImageCLI -p "a sunset" -m models/z-image-turbo-q8
       ZImageCLI -p "a forest" -m Tongyi-MAI/Z-Image-Turbo
-      ZImageCLI -p "a cut a cat" --lora ostris/z_image_turbo_childrens_drawings
+      ZImageCLI -p "a cat" --lora ostris/z_image_turbo_childrens_drawings
+      ZImageCLI -p "a cat" --lora lora1 --lora-scale 0.8 --lora lora2 --lora-scale 0.5
       ZImageCLI -p "cat" --enhance  # Enhanced prompt generation
     """)
   }
@@ -438,6 +439,7 @@ struct ZImageCLI {
     var model: String?
     var cacheLimit: Int?
     var maxSequenceLength = 512
+    var loraPaths: [(path: String, scale: Float)] = []
 
     var iterator = args.makeIterator()
     while let arg = iterator.next() {
@@ -476,6 +478,12 @@ struct ZImageCLI {
         cacheLimit = intValue(for: arg, iterator: &iterator, minimum: 1, fallback: 2048)
       case "--max-sequence-length":
         maxSequenceLength = intValue(for: arg, iterator: &iterator, minimum: 64, fallback: 512)
+      case "--lora", "-l":
+        loraPaths.append((path: nextValue(for: arg, iterator: &iterator), scale: 1.0))
+      case "--lora-scale":
+        if !loraPaths.isEmpty {
+          loraPaths[loraPaths.count - 1].scale = floatValue(for: arg, iterator: &iterator, fallback: 1.0)
+        }
       case "--help", "-h":
         printControlUsage()
         return
@@ -530,6 +538,14 @@ struct ZImageCLI {
       logger.info("GPU cache limit set to \(limit)MB")
     }
 
+    let loraConfigs: [LoRAConfiguration] = loraPaths.map { entry in
+      if entry.path.hasPrefix("/") || entry.path.hasPrefix("./") || entry.path.hasPrefix("~") {
+        return .local(entry.path, scale: entry.scale)
+      } else {
+        return .huggingFace(entry.path, scale: entry.scale)
+      }
+    }
+
     let request = ZImageControlGenerationRequest(
       prompt: prompt,
       negativePrompt: negativePrompt,
@@ -546,7 +562,8 @@ struct ZImageCLI {
       model: model,
       controlnetWeights: controlnetWeights,
       controlnetWeightsFile: controlnetWeightsFile,
-      maxSequenceLength: maxSequenceLength
+      maxSequenceLength: maxSequenceLength,
+      loras: loraConfigs
     )
 
     let pipeline = ZImageControlPipeline(logger: logger)
@@ -586,6 +603,8 @@ struct ZImageCLI {
       --model, -m               Model path or HuggingFace ID (default: \(ZImageRepository.id))
       --cache-limit             GPU memory cache limit in MB (default: unlimited)
       --max-sequence-length     Maximum sequence length for text encoding (default: 512)
+      --lora, -l                LoRA weights path or HuggingFace ID (can be specified multiple times)
+      --lora-scale              LoRA scale factor for the preceding --lora (default: 1.0)
       --help, -h                Show help
 
     Note: At least one of --control-image, --inpaint-image, or --mask must be provided.

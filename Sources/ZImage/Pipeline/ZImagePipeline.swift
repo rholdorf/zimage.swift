@@ -19,7 +19,7 @@ public struct ZImageGenerationRequest: Sendable {
   public var model: String?
   public var maxSequenceLength: Int
 
-  public var lora: LoRAConfiguration?
+  public var loras: [LoRAConfiguration]
 
   public var enhancePrompt: Bool
 
@@ -36,7 +36,7 @@ public struct ZImageGenerationRequest: Sendable {
     outputPath: URL = URL(fileURLWithPath: "z-image.png"),
     model: String? = nil,
     maxSequenceLength: Int = 512,
-    lora: LoRAConfiguration? = nil,
+    loras: [LoRAConfiguration] = [],
     enhancePrompt: Bool = false,
     enhanceMaxTokens: Int = 512
   ) {
@@ -50,7 +50,7 @@ public struct ZImageGenerationRequest: Sendable {
     self.outputPath = outputPath
     self.model = model
     self.maxSequenceLength = maxSequenceLength
-    self.lora = lora
+    self.loras = loras
     self.enhancePrompt = enhancePrompt
     self.enhanceMaxTokens = enhanceMaxTokens
   }
@@ -79,8 +79,7 @@ public final class ZImagePipeline {
   private var quantManifest: ZImageQuantizationManifest?
   private var isModelLoaded: Bool = false
   private var loadedModelId: String?
-  private var currentLoRA: LoRAWeights?
-  private var currentLoRAConfig: LoRAConfiguration?
+  private var currentLoRAs: [(config: LoRAConfiguration, weights: LoRAWeights)] = []
   private var modelSnapshot: URL?
   private var useDynamicLoRA: Bool = false
 
@@ -101,32 +100,28 @@ public final class ZImagePipeline {
     isModelLoaded = false
     loadedModelId = nil
 
-    currentLoRA = nil
-    currentLoRAConfig = nil
+    currentLoRAs = []
     modelSnapshot = nil
     useDynamicLoRA = false
     GPU.clearCache()
     logger.info("Model unloaded from memory")
   }
 
-  public func unloadLoRA() {
-    guard currentLoRA != nil else { return }
+  public func unloadLoRAs() {
+    guard !currentLoRAs.isEmpty else { return }
 
     if let trans = transformer {
-
       LoRAApplicator.clearDynamicLoRA(from: trans, logger: logger)
     }
-    currentLoRA = nil
-    currentLoRAConfig = nil
+    currentLoRAs = []
     useDynamicLoRA = false
     GPU.clearCache()
-    logger.info("LoRA unloaded (instant)")
+    logger.info("LoRAs unloaded (instant)")
   }
   public func unloadTransformer() {
     transformer = nil
 
-    currentLoRA = nil
-    currentLoRAConfig = nil
+    currentLoRAs = []
     useDynamicLoRA = false
 
     GPU.clearCache()
@@ -238,8 +233,7 @@ public final class ZImagePipeline {
         textEncoder = nil
         transformer = nil
 
-        currentLoRA = nil
-        currentLoRAConfig = nil
+        currentLoRAs = []
         useDynamicLoRA = false
       } else {
         logger.info("Different model requested, unloading current model")
@@ -295,43 +289,47 @@ public final class ZImagePipeline {
 
     logger.info("Model loaded successfully and cached in memory")
   }
-  public func loadLoRA(_ config: LoRAConfiguration, progressHandler: ProgressHandler? = nil) async throws {
+  public func loadLoRAs(_ configs: [LoRAConfiguration], progressHandler: ProgressHandler? = nil) async throws {
     guard let trans = transformer else {
       throw PipelineError.transformerNotLoaded
     }
-    if let currentConfig = currentLoRAConfig, currentConfig == config {
-      logger.info("LoRA already loaded with same configuration, skipping")
+    let currentConfigs = currentLoRAs.map(\.config)
+    if currentConfigs == configs {
+      logger.info("LoRAs already loaded with same configuration, skipping")
       return
     }
-    if currentLoRA != nil {
-      logger.info("Unloading previous LoRA...")
-      unloadLoRA()
+    if !currentLoRAs.isEmpty {
+      logger.info("Unloading previous LoRAs...")
+      unloadLoRAs()
     }
 
-    progressHandler?(GenerationProgress(stage: .loadingLoRA, stepIndex: 0, totalSteps: 1))
-    logger.info("Loading LoRA from \(config.source.displayName)...")
+    guard !configs.isEmpty else { return }
+
+    progressHandler?(GenerationProgress(stage: .loadingLoRA, stepIndex: 0, totalSteps: configs.count))
+    useDynamicLoRA = true
 
     do {
+      for (index, config) in configs.enumerated() {
+        logger.info("Loading LoRA \(index + 1)/\(configs.count) from \(config.source.displayName)...")
+        progressHandler?(GenerationProgress(stage: .loadingLoRA, stepIndex: index, totalSteps: configs.count))
 
-      let loraWeights = try await LoRAWeightLoader.load(from: config)
-      logger.info("Loaded LoRA: rank=\(loraWeights.rank), alpha=\(loraWeights.alpha), layers=\(loraWeights.layerCount)")
+        let loraWeights = try await LoRAWeightLoader.load(from: config)
+        logger.info("Loaded LoRA: rank=\(loraWeights.rank), alpha=\(loraWeights.alpha), layers=\(loraWeights.layerCount)")
 
-      useDynamicLoRA = true
-      LoRAApplicator.applyDynamically(to: trans, loraWeights: loraWeights, scale: config.scale, logger: logger)
+        LoRAApplicator.applyDynamically(to: trans, loraWeights: loraWeights, scale: config.scale, logger: logger)
+        currentLoRAs.append((config: config, weights: loraWeights))
 
-      currentLoRA = loraWeights
-      currentLoRAConfig = config
-
-      logger.info("LoRA applied successfully with scale=\(config.scale)")
+        logger.info("LoRA applied successfully with scale=\(config.scale)")
+      }
     } catch let error as LoRAError {
       throw PipelineError.loraError(error)
     }
   }
   public var hasLoRALoaded: Bool {
-    return currentLoRA != nil
+    return !currentLoRAs.isEmpty
   }
-  public var loadedLoRAConfig: LoRAConfiguration? {
-    return currentLoRAConfig
+  public var loadedLoRAConfigs: [LoRAConfiguration] {
+    return currentLoRAs.map(\.config)
   }
 
   public func generate(_ request: ZImageGenerationRequest, progressHandler: ProgressHandler? = nil) async throws -> URL {
@@ -377,14 +375,13 @@ public final class ZImagePipeline {
           let modelConfigs = modelConfigs else {
       throw PipelineError.modelNotLoaded
     }
-    if let loraConfig = request.lora {
-
-      if currentLoRAConfig != loraConfig {
-        try await loadLoRA(loraConfig, progressHandler: progressHandler)
+    if !request.loras.isEmpty {
+      let currentConfigs = currentLoRAs.map(\.config)
+      if currentConfigs != request.loras {
+        try await loadLoRAs(request.loras, progressHandler: progressHandler)
       }
-    } else if currentLoRA != nil {
-
-      unloadLoRA()
+    } else if !currentLoRAs.isEmpty {
+      unloadLoRAs()
     }
     progressHandler?(GenerationProgress(stage: .encodingText, stepIndex: 0, totalSteps: request.steps))
     var finalPrompt = request.prompt
@@ -447,8 +444,8 @@ public final class ZImagePipeline {
 
     let timestepsArray = scheduler.timesteps.asArray(Float.self)
 
-    logger.info("Running \(request.steps) denoising steps...")
     for stepIndex in 0..<request.steps {
+      logger.info("Running \(stepIndex + 1)/\(request.steps) denoising steps...")
       try Task.checkCancellation()
       progressHandler?(GenerationProgress(stage: .denoising, stepIndex: stepIndex, totalSteps: request.steps))
       let timestep = timestepsArray[stepIndex]

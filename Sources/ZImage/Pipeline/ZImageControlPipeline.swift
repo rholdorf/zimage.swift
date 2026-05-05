@@ -51,7 +51,7 @@ public struct ZImageControlGenerationRequest {
   public var controlnetWeights: String?
   public var controlnetWeightsFile: String?
   public var maxSequenceLength: Int
-  public var lora: LoRAConfiguration?
+  public var loras: [LoRAConfiguration]
   public var progressCallback: ControlProgressCallback?
   public var enhancePrompt: Bool
   public var enhanceMaxTokens: Int
@@ -72,7 +72,7 @@ public struct ZImageControlGenerationRequest {
     controlnetWeights: String? = nil,
     controlnetWeightsFile: String? = nil,
     maxSequenceLength: Int = 512,
-    lora: LoRAConfiguration? = nil,
+    loras: [LoRAConfiguration] = [],
     progressCallback: ControlProgressCallback? = nil,
     enhancePrompt: Bool = false,
     enhanceMaxTokens: Int = 512
@@ -93,7 +93,7 @@ public struct ZImageControlGenerationRequest {
     self.controlnetWeights = controlnetWeights
     self.controlnetWeightsFile = controlnetWeightsFile
     self.maxSequenceLength = maxSequenceLength
-    self.lora = lora
+    self.loras = loras
     self.progressCallback = progressCallback
     self.enhancePrompt = enhancePrompt
     self.enhanceMaxTokens = enhanceMaxTokens
@@ -115,7 +115,7 @@ public struct ZImageControlGenerationRequest {
     controlnetWeights: String? = nil,
     controlnetWeightsFile: String? = nil,
     maxSequenceLength: Int = 512,
-    lora: LoRAConfiguration? = nil,
+    loras: [LoRAConfiguration] = [],
     progressCallback: ControlProgressCallback? = nil,
     enhancePrompt: Bool = false,
     enhanceMaxTokens: Int = 512
@@ -139,7 +139,7 @@ public struct ZImageControlGenerationRequest {
     self.controlnetWeights = controlnetWeights
     self.controlnetWeightsFile = controlnetWeightsFile
     self.maxSequenceLength = maxSequenceLength
-    self.lora = lora
+    self.loras = loras
     self.progressCallback = progressCallback
     self.enhancePrompt = enhancePrompt
     self.enhanceMaxTokens = enhanceMaxTokens
@@ -169,8 +169,7 @@ public class ZImageControlPipeline {
   private var snapshot: URL?
   private var loadedModelId: String?
   private var loadedControlnetWeightsId: String?
-  private var currentLoRA: LoRAWeights?
-  private var currentLoRAConfig: LoRAConfiguration?
+  private var currentLoRAs: [(config: LoRAConfiguration, weights: LoRAWeights)] = []
   private struct CachedPromptEmbedding {
     let prompt: String
     let negativePrompt: String?
@@ -535,44 +534,41 @@ public class ZImageControlPipeline {
     )
   }
   #endif
-  private func applyLoRAIfNeeded(_ requestedConfig: LoRAConfiguration?) async throws {
+  private func applyLoRAsIfNeeded(_ requestedConfigs: [LoRAConfiguration]) async throws {
     guard let transformer = self.transformer else {
       throw PipelineError.transformerNotLoaded
     }
-    if let currentConfig = currentLoRAConfig, let requestedConfig = requestedConfig, currentConfig == requestedConfig {
-      logger.info("LoRA already loaded with same configuration, skipping")
+    let currentConfigs = currentLoRAs.map(\.config)
+    if currentConfigs == requestedConfigs {
+      logger.info("LoRAs already loaded with same configuration, skipping")
       return
     }
-    if currentLoRA != nil {
-      logger.info("Clearing previous LoRA...")
+    if !currentLoRAs.isEmpty {
+      logger.info("Clearing previous LoRAs...")
       LoRAApplicator.clearDynamicLoRA(from: transformer, logger: logger)
-      currentLoRA = nil
-      currentLoRAConfig = nil
+      currentLoRAs = []
     }
-    if let config = requestedConfig {
-      logger.info("Loading LoRA from \(config.source.displayName)...")
+    for (index, config) in requestedConfigs.enumerated() {
+      logger.info("Loading LoRA \(index + 1)/\(requestedConfigs.count) from \(config.source.displayName)...")
       let loraWeights = try await LoRAWeightLoader.load(from: config)
       logger.info("Loaded LoRA: rank=\(loraWeights.rank), alpha=\(loraWeights.alpha), layers=\(loraWeights.layerCount)")
       LoRAApplicator.applyDynamically(to: transformer, loraWeights: loraWeights, scale: config.scale, logger: logger)
-      currentLoRA = loraWeights
-      currentLoRAConfig = config
+      currentLoRAs.append((config: config, weights: loraWeights))
       logger.info("LoRA applied successfully with scale=\(config.scale)")
     }
   }
-  public func unloadLoRA() {
+  public func unloadLoRAs() {
     guard let transformer = self.transformer else { return }
-    if currentLoRA != nil {
+    if !currentLoRAs.isEmpty {
       LoRAApplicator.clearDynamicLoRA(from: transformer, logger: logger)
-      currentLoRA = nil
-      currentLoRAConfig = nil
+      currentLoRAs = []
       GPU.clearCache()
-      logger.info("LoRA unloaded")
+      logger.info("LoRAs unloaded")
     }
   }
   public func unloadTransformer() {
     transformer = nil
-    currentLoRA = nil
-    currentLoRAConfig = nil
+    currentLoRAs = []
     GPU.clearCache()
     logger.info("Transformer unloaded for memory optimization")
   }
@@ -589,10 +585,10 @@ public class ZImageControlPipeline {
     return UInt64(stats.free_count) * pageSize
   }
   public var hasLoRALoaded: Bool {
-    return currentLoRA != nil
+    return !currentLoRAs.isEmpty
   }
-  public var loadedLoRAConfig: LoRAConfiguration? {
-    return currentLoRAConfig
+  public var loadedLoRAConfigs: [LoRAConfiguration] {
+    return currentLoRAs.map(\.config)
   }
   public func generate(_ request: ZImageControlGenerationRequest) async throws -> URL {
     logger.info("Requested Z-Image control generation")
@@ -609,8 +605,7 @@ public class ZImageControlPipeline {
       self.modelConfigs = nil
       self.quantManifest = nil
       self.snapshot = nil
-      self.currentLoRA = nil
-      self.currentLoRAConfig = nil
+      self.currentLoRAs = []
       self.cachedPromptEmbedding = nil
       GPU.clearCache()
       let snapshot = try await PipelineSnapshot.prepare(model: request.model, logger: logger)
@@ -687,7 +682,7 @@ public class ZImageControlPipeline {
     } else if requestedControlnetId != nil {
       logger.info("Reusing cached controlnet weights")
     }
-    try await applyLoRAIfNeeded(request.lora)
+    try await applyLoRAsIfNeeded(request.loras)
     guard let snapshot = self.snapshot,
           let modelConfigs = self.modelConfigs,
           let tokenizer = self.tokenizer,
@@ -867,15 +862,15 @@ public class ZImageControlPipeline {
         )
         self.loadedControlnetWeightsId = controlnetSpec
       }
-      if let loraConfig = request.lora {
-        try await applyLoRAIfNeeded(loraConfig)
+      if !request.loras.isEmpty {
+        try await applyLoRAsIfNeeded(request.loras)
       }
     }
     guard let transformer = self.transformer else {
       throw PipelineError.transformerNotLoaded
     }
-    logger.info("Running \(request.steps) denoising steps with control_context_scale=\(request.controlContextScale)...")
     for stepIndex in 0..<request.steps {
+      logger.info("Running \(stepIndex + 1)/\(request.steps) denoising steps with control_context_scale=\(request.controlContextScale)...")
       try Task.checkCancellation()
       request.progressCallback?(ControlProgress(
         stage: "Denoising",
@@ -944,8 +939,7 @@ public class ZImageControlPipeline {
       self.modelConfigs = nil
       self.quantManifest = nil
       self.snapshot = nil
-      self.currentLoRA = nil
-      self.currentLoRAConfig = nil
+      self.currentLoRAs = []
       self.cachedPromptEmbedding = nil
       GPU.clearCache()
       let snapshot = try await PipelineSnapshot.prepare(model: request.model, logger: logger)
@@ -1022,7 +1016,7 @@ public class ZImageControlPipeline {
     } else if requestedControlnetId != nil {
       logger.info("Reusing cached controlnet weights")
     }
-    try await applyLoRAIfNeeded(request.lora)
+    try await applyLoRAsIfNeeded(request.loras)
     guard let snapshot = self.snapshot,
           let modelConfigs = self.modelConfigs,
           let tokenizer = self.tokenizer,
@@ -1186,15 +1180,15 @@ public class ZImageControlPipeline {
         )
         self.loadedControlnetWeightsId = controlnetSpec
       }
-      if let loraConfig = request.lora {
-        try await applyLoRAIfNeeded(loraConfig)
+      if !request.loras.isEmpty {
+        try await applyLoRAsIfNeeded(request.loras)
       }
     }
     guard let transformer = self.transformer else {
       throw PipelineError.transformerNotLoaded
     }
-    logger.info("Running \(request.steps) denoising steps with control_context_scale=\(request.controlContextScale)...")
     for stepIndex in 0..<request.steps {
+      logger.info("Running \(stepIndex + 1)/\(request.steps) denoising steps with control_context_scale=\(request.controlContextScale)...")
       try Task.checkCancellation()
       request.progressCallback?(ControlProgress(
         stage: "Denoising",
