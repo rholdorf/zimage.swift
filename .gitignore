@@ -10,7 +10,8 @@ xcuserdata/
 # OS
 .DS_Store
 
-# Local temp & caches
+# Local output, temp & caches
+output/
 temp/
 *.cache
 *.profraw
