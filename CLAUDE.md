@@ -69,3 +69,17 @@ xcodebuild test -scheme zimage.swift -destination 'platform=macOS' -enableCodeCo
 - macOS 14.0+ / iOS 16+
 - Apple Silicon
 - Swift 5.9+
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`rholdorf/zimage.swift`). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default label vocabulary (needs-triage, needs-info, ready-for-agent, ready-for-human, wontfix). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout — `CONTEXT.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
